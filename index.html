@@ -1,1 +1,141 @@
-j
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>حجز المواعيد – المؤسسة العمومية للصحة الحوارية ببريان</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Font: Tajawal -->
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="font-[Tajawal] bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-white shadow-md">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between">
+      <div class="text-center sm:text-right">
+        <h1 class="text-lg sm:text-xl font-bold text-cyan-800">المؤسسة العمومية للصحة الحوارية ببريان</h1>
+        <h2 class="text-base sm:text-lg font-medium text-cyan-700">المؤسسة العمومية الاستشفائية ببريان</h2>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-5xl mx-auto px-4 py-8 w-full">
+    <!-- Tab Navigation (public view) -->
+    <div id="public-view">
+      <div class="flex justify-center mb-8 space-x-2 space-x-reverse">
+        <button id="tab-booking" class="tab-btn active px-6 py-3 bg-cyan-600 text-white rounded-t-lg">حجز موعد</button>
+        <button id="tab-admin" class="tab-btn px-6 py-3 bg-gray-200 rounded-t-lg">دخول المسؤول</button>
+        <button id="tab-specialist" class="tab-btn px-6 py-3 bg-gray-200 rounded-t-lg">دخول الأخصائي</button>
+      </div>
+
+      <!-- Booking Form -->
+      <section id="booking-section" class="bg-white p-6 rounded-xl shadow-md">
+        <h3 class="text-xl font-bold mb-6 text-cyan-800 border-b pb-2">نموذج حجز موعد</h3>
+        <form id="booking-form" class="space-y-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-medium mb-1">رقم التعريف الوطني (NIN)</label>
+              <input type="text" id="nin" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div>
+              <label class="block font-medium mb-1">الاسم</label>
+              <input type="text" id="first-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div>
+              <label class="block font-medium mb-1">اللقب</label>
+              <input type="text" id="last-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div>
+              <label class="block font-medium mb-1">تاريخ الميلاد</label>
+              <input type="date" id="dob" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div>
+              <label class="block font-medium mb-1">رسالة التوجيه (صورة)</label>
+              <input type="file" id="letter" accept="image/*" capture="environment" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div>
+              <label class="block font-medium mb-1">اختيار الأخصائي</label>
+              <select id="specialist-select" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none">
+                <option value="">اختر الأخصائي</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-medium mb-1">التاريخ</label>
+              <select id="date-select" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none">
+                <option value="">اختر التاريخ</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-medium mb-1">الساعة</label>
+              <select id="time-select" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none">
+                <option value="">اختر الساعة</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg transition">تأكيد الحجز</button>
+          <p id="booking-msg" class="text-center text-sm mt-2"></p>
+        </form>
+      </section>
+
+      <!-- Admin Login (hidden initially) -->
+      <section id="admin-login-section" class="hidden bg-white p-6 rounded-xl shadow-md">
+        <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول المسؤول</h3>
+        <div class="flex items-center gap-3">
+          <input type="password" id="admin-password" placeholder="كلمة المرور" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+          <button id="admin-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
+        </div>
+        <p id="admin-login-msg" class="text-sm mt-2"></p>
+      </section>
+
+      <!-- Specialist Login (hidden initially) -->
+      <section id="specialist-login-section" class="hidden bg-white p-6 rounded-xl shadow-md">
+        <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول الأخصائي</h3>
+        <div class="flex items-center gap-3">
+          <input type="text" id="specialist-token" placeholder="رمز الدخول" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+          <button id="specialist-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
+        </div>
+        <p id="specialist-login-msg" class="text-sm mt-2"></p>
+      </section>
+    </div>
+
+    <!-- Admin Dashboard (hidden, shown after login) -->
+    <div id="admin-dashboard" class="hidden">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-cyan-800">لوحة تحكم المسؤول</h2>
+        <button id="admin-logout" class="bg-red-500 text-white px-4 py-2 rounded-lg">تسجيل الخروج</button>
+      </div>
+      <div class="flex flex-wrap gap-4 mb-6">
+        <button class="admin-tab-btn bg-cyan-600 text-white px-6 py-2 rounded" data-tab="specialists">إدارة الأخصائيين</button>
+        <button class="admin-tab-btn bg-gray-200 px-6 py-2 rounded" data-tab="schedules">إدارة الجداول</button>
+        <button class="admin-tab-btn bg-gray-200 px-6 py-2 rounded" data-tab="reservations">الحجوزات</button>
+        <button class="admin-tab-btn bg-gray-200 px-6 py-2 rounded" data-tab="generate-token">توليد رمز أخصائي</button>
+      </div>
+      <div id="admin-content" class="bg-white p-6 rounded-xl shadow-md"></div>
+    </div>
+
+    <!-- Specialist Dashboard -->
+    <div id="specialist-dashboard" class="hidden">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-bold text-cyan-800">حجوزات الأخصائي</h2>
+        <button id="specialist-logout" class="bg-red-500 text-white px-4 py-2 rounded-lg">تسجيل الخروج</button>
+      </div>
+      <div id="specialist-reservations" class="bg-white p-6 rounded-xl shadow-md"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-cyan-900 text-white text-center py-4 mt-auto">
+    <p>تطوير <span class="font-bold">Ing. Ferhat H.</span></p>
+    <p class="text-sm opacity-80">© 2026 المؤسسة العمومية للصحة الحوارية ببريان</p>
+  </footer>
+
+  <!-- Custom JavaScript -->
+  <script src="script.js"></script>
+</body>
+</html>
