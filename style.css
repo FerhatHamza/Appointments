@@ -1,0 +1,27 @@
+/* Custom styles (Tailwind already handles most of the design) */
+
+/* RTL enhancements */
+[dir="rtl"] .space-x-2 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 1;
+}
+
+/* Tab active */
+.tab-btn.active {
+  background-color: #0891b2; /* cyan-600 */
+  color: white;
+}
+.tab-btn:not(.active) {
+  background-color: #e5e7eb; /* gray-200 */
+  color: #374151;
+}
+.tab-btn:not(.active):hover {
+  background-color: #d1d5db;
+}
+
+/* Admin tab buttons */
+.admin-tab-btn {
+  transition: all 0.2s;
+}
+.admin-tab-btn:hover {
+  opacity: 0.9;
+}
