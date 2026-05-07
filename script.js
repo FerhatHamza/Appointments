@@ -19,8 +19,6 @@ const adminPassword = 'admin123'; // hardcoded
 let currentAdminPassword = null;
 let specialistToken = null;
 let allSpecialists = [];
-let allSchedules = [];
-let allSlots = [];
 
 // ====== Helper to call API ======
 async function apiCall(url, options = {}) {
@@ -132,7 +130,6 @@ document.getElementById('booking-form').addEventListener('submit', async functio
   const slotId = document.getElementById('time-select').value;
   if (!slotId) return msg.textContent = 'الرجاء اختيار الساعة';
 
-  // Convert file to base64 if provided
   let letterBase64 = null;
   const fileInput = document.getElementById('letter');
   if (fileInput.files.length > 0) {
@@ -162,7 +159,6 @@ document.getElementById('booking-form').addEventListener('submit', async functio
     });
     msg.textContent = 'تم الحجز بنجاح!';
     document.getElementById('booking-form').reset();
-    // reload slots
     document.getElementById('date-select').dispatchEvent(new Event('change'));
   } catch (err) {
     msg.textContent = 'فشل الحجز: ' + err.message;
@@ -284,9 +280,135 @@ async function deleteSpecialist(id) {
   }
 }
 
-// ... (the rest of the admin functions: loadAdminSchedules, showScheduleForm, saveSchedule, deleteSchedule,
-// loadAdminReservations, deleteReservation, loadGenerateToken, generateToken)
-// Paste the exact same code from the previous answer for these functions.
+async function loadAdminSchedules() {
+  const content = document.getElementById('admin-content');
+  try {
+    const scheds = await apiCall('/schedules', { headers: { 'x-admin-password': currentAdminPassword } });
+    let html = `<h3 class="text-lg font-bold mb-4">الجداول</h3>`;
+    html += `<button onclick="showScheduleForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة جدول</button>`;
+    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
+    for (let s of scheds) {
+      const spec = allSpecialists.find(sp => sp.id === s.specialist_id) || { name: 'غير معروف' };
+      html += `<tr><td class="p-2 border">${spec.name}</td><td class="p-2 border">${s.date}</td><td class="p-2 border">
+        <button onclick="deleteSchedule(${s.id})" class="text-red-600">حذف</button>
+      </td></tr>`;
+    }
+    html += `</tbody></table></div>`;
+    html += `<div id="schedule-form-container" class="mt-4"></div>`;
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
+  }
+}
+
+function showScheduleForm() {
+  const container = document.getElementById('schedule-form-container');
+  let options = '';
+  allSpecialists.forEach(s => {
+    options += `<option value="${s.id}">${s.name}</option>`;
+  });
+  container.innerHTML = `
+    <form onsubmit="saveSchedule(event)" class="space-y-3 bg-gray-50 p-4 rounded">
+      <select id="sched-specialist" class="w-full border p-2 rounded">${options}</select>
+      <input type="date" id="sched-date" required class="w-full border p-2 rounded" />
+      <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">إضافة</button>
+      <button type="button" onclick="loadAdminSchedules()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
+    </form>
+  `;
+}
+
+async function saveSchedule(e) {
+  e.preventDefault();
+  const specialist_id = document.getElementById('sched-specialist').value;
+  const date = document.getElementById('sched-date').value;
+  try {
+    await apiCall('/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
+      body: JSON.stringify({ specialist_id, date })
+    });
+    loadAdminSchedules();
+  } catch (e) {
+    alert('خطأ: ' + e.message);
+  }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('حذف الجدول سيؤدي لحذف جميع المواعيد المرتبطة. استمر؟')) return;
+  try {
+    await apiCall(`/schedules/${id}`, { method: 'DELETE', headers: { 'x-admin-password': currentAdminPassword } });
+    loadAdminSchedules();
+  } catch (e) {
+    alert('خطأ: ' + e.message);
+  }
+}
+
+async function loadAdminReservations() {
+  const content = document.getElementById('admin-content');
+  try {
+    const reservations = await apiCall('/reservations?all=true', { headers: { 'x-admin-password': currentAdminPassword } });
+    let html = `<h3 class="text-lg font-bold mb-4">جميع الحجوزات</h3>`;
+    if (reservations.length === 0) {
+      html += `<p>لا توجد حجوزات.</p>`;
+    } else {
+      html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
+      reservations.forEach(r => {
+        html += `<tr>
+          <td class="p-2 border">${r.patient_first_name} ${r.patient_last_name}</td>
+          <td class="p-2 border">${r.patient_nin}</td>
+          <td class="p-2 border">${r.patient_dob}</td>
+          <td class="p-2 border">${r.specialist_name}</td>
+          <td class="p-2 border">${r.date}</td>
+          <td class="p-2 border">${r.start_time}</td>
+          <td class="p-2 border"><button onclick="deleteReservation(${r.id})" class="text-red-600">حذف</button></td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
+  }
+}
+
+async function deleteReservation(id) {
+  if (!confirm('هل تريد حذف الحجز؟')) return;
+  try {
+    await apiCall(`/reservations/${id}`, { method: 'DELETE', headers: { 'x-admin-password': currentAdminPassword } });
+    loadAdminReservations();
+  } catch (e) {
+    alert('خطأ: ' + e.message);
+  }
+}
+
+async function loadGenerateToken() {
+  const content = document.getElementById('admin-content');
+  try {
+    let html = `<h3 class="text-lg font-bold mb-4">توليد رمز دخول أخصائي</h3>`;
+    html += `<select id="token-specialist" class="border p-2 rounded mb-2">`;
+    allSpecialists.forEach(s => html += `<option value="${s.id}">${s.name}</option>`);
+    html += `</select>`;
+    html += `<button onclick="generateToken()" class="bg-cyan-600 text-white px-4 py-2 rounded">توليد</button>`;
+    html += `<p id="token-result" class="mt-2 font-mono text-green-700"></p>`;
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
+  }
+}
+
+async function generateToken() {
+  const specialistId = document.getElementById('token-specialist').value;
+  try {
+    const res = await apiCall('/generate-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
+      body: JSON.stringify({ specialist_id: specialistId })
+    });
+    document.getElementById('token-result').textContent = 'الرمز: ' + res.token;
+  } catch (e) {
+    alert('خطأ: ' + e.message);
+  }
+}
 
 // ====== Specialist Login / Logout ======
 document.getElementById('specialist-login-btn').addEventListener('click', async () => {
