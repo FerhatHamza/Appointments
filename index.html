@@ -134,7 +134,14 @@
     <p>تطوير <span class="font-bold">Ing. Ferhat H.</span></p>
     <p class="text-sm opacity-80">© 2026 المؤسسة العمومية للصحة الحوارية ببريان</p>
   </footer>
-
+  <!-- Modal -->
+  <div id="modal-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+    <div id="modal-box" class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-screen overflow-y-auto relative">
+      <button id="modal-close" class="absolute top-2 left-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  
   <!-- Custom JavaScript -->
   <script src="script.js"></script>
 </body>
