@@ -181,7 +181,7 @@ export async function onRequest(context) {
         WHERE spec.id = ?
         ORDER BY sch.date, s.start_time
       `).bind(specialistId).all();
-      return new Response(JSON.stringify(results), { headers });
+      return new Response(JSON.stringify({ specialistId: specialistId, reservations: results }), { headers });
     }
 
     return new Response('Not Found', { status: 404, headers });
