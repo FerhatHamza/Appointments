@@ -15,10 +15,12 @@ document.addEventListener('keydown', e => {
 const API_BASE = '/api';
 
 // ====== State ======
-const adminPassword = 'admin123'; // hardcoded
+const adminPassword = 'admin123';
 let currentAdminPassword = null;
 let specialistToken = null;
 let allSpecialists = [];
+let currentReservations = []; // لتخزين الحجوزات المُحمّلة حديثاً
+let currentSpecialistId = null; // ID الأخصائي بعد تسجيل الدخول
 
 // ====== Helper to call API ======
 async function apiCall(url, options = {}) {
@@ -40,7 +42,7 @@ function showAdminDashboard() {
   document.getElementById('public-view').classList.add('hidden');
   document.getElementById('admin-dashboard').classList.remove('hidden');
   document.getElementById('specialist-dashboard').classList.add('hidden');
-  loadAdminSpecialists(); // default tab
+  loadAdminSpecialists();
 }
 function showSpecialistDashboard() {
   document.getElementById('public-view').classList.add('hidden');
@@ -128,18 +130,30 @@ document.getElementById('booking-form').addEventListener('submit', async functio
   msg.textContent = 'جاري الحجز...';
 
   const slotId = document.getElementById('time-select').value;
-  if (!slotId) return msg.textContent = 'الرجاء اختيار الساعة';
+  if (!slotId) {
+    msg.textContent = 'الرجاء اختيار الساعة';
+    return;
+  }
 
   let letterBase64 = null;
   const fileInput = document.getElementById('letter');
   if (fileInput.files.length > 0) {
     const file = fileInput.files[0];
-    letterBase64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    if (file.size > 1024 * 1024) {
+      msg.textContent = 'حجم الصورة كبير جدًا (الحد الأقصى 1 ميغابايت)';
+      return;
+    }
+    try {
+      letterBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('فشل قراءة الملف'));
+        reader.readAsDataURL(file);
+      });
+    } catch (err) {
+      msg.textContent = 'خطأ في تحميل الصورة: ' + err.message;
+      return;
+    }
   }
 
   const body = {
@@ -159,9 +173,16 @@ document.getElementById('booking-form').addEventListener('submit', async functio
     });
     msg.textContent = 'تم الحجز بنجاح!';
     document.getElementById('booking-form').reset();
-    document.getElementById('date-select').dispatchEvent(new Event('change'));
+    document.getElementById('date-select').innerHTML = '<option value="">اختر التاريخ</option>';
+    document.getElementById('time-select').innerHTML = '<option value="">اختر الساعة</option>';
   } catch (err) {
-    msg.textContent = 'فشل الحجز: ' + err.message;
+    let errorMsg = err.message;
+    try {
+      const jsonError = JSON.parse(err.message);
+      if (jsonError.error) errorMsg = jsonError.error;
+    } catch (e) {}
+    msg.textContent = 'فشل الحجز: ' + errorMsg;
+    console.error('Booking error:', err);
   }
 });
 
@@ -347,11 +368,12 @@ async function loadAdminReservations() {
   const content = document.getElementById('admin-content');
   try {
     const reservations = await apiCall('/reservations?all=true', { headers: { 'x-admin-password': currentAdminPassword } });
+    currentReservations = reservations; // تخزين لاستعمالها لاحقاً
     let html = `<h3 class="text-lg font-bold mb-4">جميع الحجوزات</h3>`;
     if (reservations.length === 0) {
       html += `<p>لا توجد حجوزات.</p>`;
     } else {
-      html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
+      html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">رسالة التوجيه</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
       reservations.forEach(r => {
         html += `<tr>
           <td class="p-2 border">${r.patient_first_name} ${r.patient_last_name}</td>
@@ -360,12 +382,14 @@ async function loadAdminReservations() {
           <td class="p-2 border">${r.specialist_name}</td>
           <td class="p-2 border">${r.date}</td>
           <td class="p-2 border">${r.start_time}</td>
+          <td class="p-2 border"><button class="view-letter-btn text-blue-600" data-reservation-id="${r.id}">عرض</button></td>
           <td class="p-2 border"><button onclick="deleteReservation(${r.id})" class="text-red-600">حذف</button></td>
         </tr>`;
       });
       html += `</tbody></table></div>`;
     }
     content.innerHTML = html;
+    attachModalEvents();
   } catch (e) {
     content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
   }
@@ -410,7 +434,7 @@ async function generateToken() {
   }
 }
 
-// ====== Specialist Login / Logout ======
+// ====== Specialist Login ======
 document.getElementById('specialist-login-btn').addEventListener('click', async () => {
   const token = document.getElementById('specialist-token').value.trim();
   const msg = document.getElementById('specialist-login-msg');
@@ -419,6 +443,7 @@ document.getElementById('specialist-login-btn').addEventListener('click', async 
     const data = await apiCall(`/specialist-reservations?token=${encodeURIComponent(token)}`);
     if (data.error) throw new Error(data.error);
     specialistToken = token;
+    // currentSpecialistId سيُحدَّث لاحقاً بعد تحميل الحجوزات
     showSpecialistDashboard();
   } catch (e) {
     msg.textContent = 'الرمز غير صحيح أو منتهي الصلاحية';
@@ -426,8 +451,10 @@ document.getElementById('specialist-login-btn').addEventListener('click', async 
   }
 });
 
+// ====== Specialist Logout ======
 document.getElementById('specialist-logout').addEventListener('click', () => {
   specialistToken = null;
+  currentSpecialistId = null;
   showPublicView();
   document.getElementById('specialist-token').value = '';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -441,25 +468,167 @@ async function loadSpecialistReservations() {
   const container = document.getElementById('specialist-reservations');
   try {
     const data = await apiCall(`/specialist-reservations?token=${encodeURIComponent(specialistToken)}`);
-    if (data.length === 0) {
+    if (data.error) throw new Error(data.error);
+    const { specialistId, reservations } = data;
+    currentSpecialistId = specialistId;
+    currentReservations = reservations;
+    if (reservations.length === 0) {
       container.innerHTML = `<p>لا توجد حجوزات لهذا الأخصائي.</p>`;
       return;
     }
-    let html = `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th></tr></thead><tbody>`;
-    data.forEach(r => {
+    let html = `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">رسالة التوجيه</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
+    reservations.forEach(r => {
       html += `<tr>
         <td class="p-2 border">${r.patient_first_name} ${r.patient_last_name}</td>
         <td class="p-2 border">${r.patient_nin}</td>
         <td class="p-2 border">${r.patient_dob}</td>
         <td class="p-2 border">${r.date}</td>
         <td class="p-2 border">${r.start_time}</td>
+        <td class="p-2 border"><button class="view-letter-btn text-blue-600" data-reservation-id="${r.id}">عرض</button></td>
+        <td class="p-2 border"><button class="follow-up-btn text-green-600" data-reservation-id="${r.id}">حجز متابعة</button></td>
       </tr>`;
     });
     html += `</tbody></table></div>`;
     container.innerHTML = html;
+    attachModalEvents();
   } catch (e) {
     container.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
   }
+}
+
+// ====== Modal functions ======
+function showModal(htmlContent) {
+  document.getElementById('modal-body').innerHTML = htmlContent;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.add('hidden');
+});
+
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.add('hidden');
+});
+
+// عرض صورة رسالة التوجيه
+function viewLetter(reservationId) {
+  const reservation = currentReservations.find(r => r.id == reservationId);
+  if (reservation && reservation.letter_base64) {
+    showModal(`<img src="${reservation.letter_base64}" alt="رسالة التوجيه" class="max-w-full h-auto rounded" />`);
+  } else {
+    alert('لا توجد رسالة توجيه لهذا الحجز');
+  }
+}
+
+// ------ متابعة (حجز موعد جديد من قبل الأخصائي) ------
+async function loadSpecialistsIntoSelect(selectId, defaultId = null) {
+  const specialists = await apiCall('/specialists');
+  const select = document.getElementById(selectId);
+  select.innerHTML = '<option value="">اختر الأخصائي</option>';
+  specialists.forEach(s => {
+    const selected = (s.id == defaultId) ? 'selected' : '';
+    select.innerHTML += `<option value="${s.id}" ${selected}>${s.name}${s.specialty ? ' - ' + s.specialty : ''}</option>`;
+  });
+}
+
+async function loadFollowSchedules(specialistId) {
+  const dateSelect = document.getElementById('follow-date');
+  const timeSelect = document.getElementById('follow-time');
+  dateSelect.innerHTML = '<option value="">اختر التاريخ</option>';
+  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
+  if (!specialistId) return;
+  const schedules = await apiCall(`/schedules?specialist_id=${specialistId}`);
+  schedules.forEach(s => dateSelect.innerHTML += `<option value="${s.id}">${s.date}</option>`);
+}
+
+async function loadFollowSlots(scheduleId) {
+  const timeSelect = document.getElementById('follow-time');
+  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
+  if (!scheduleId) return;
+  const slots = await apiCall(`/slots?schedule_id=${scheduleId}&available=1`);
+  slots.forEach(slot => timeSelect.innerHTML += `<option value="${slot.id}">${slot.start_time}</option>`);
+}
+
+function showFollowUpModal(reservation) {
+  const patient = {
+    nin: reservation.patient_nin,
+    firstName: reservation.patient_first_name,
+    lastName: reservation.patient_last_name,
+    dob: reservation.patient_dob
+  };
+
+  const html = `
+    <h3 class="text-xl font-bold mb-4 text-cyan-800">حجز موعد متابعة</h3>
+    <p class="mb-4"><strong>المريض:</strong> ${patient.firstName} ${patient.lastName} (NIN: ${patient.nin})</p>
+    <div class="space-y-4">
+      <div>
+        <label class="block font-medium mb-1">اختيار الأخصائي</label>
+        <select id="follow-specialist" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"></select>
+      </div>
+      <div>
+        <label class="block font-medium mb-1">التاريخ</label>
+        <select id="follow-date" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"><option value="">اختر التاريخ</option></select>
+      </div>
+      <div>
+        <label class="block font-medium mb-1">الساعة</label>
+        <select id="follow-time" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"><option value="">اختر الساعة</option></select>
+      </div>
+      <button id="submit-follow-up" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg transition">تأكيد الحجز</button>
+      <p id="follow-msg" class="text-center text-sm mt-2"></p>
+    </div>
+  `;
+  showModal(html);
+
+  // تحميل الأخصائيين واختيار الأخصائي الحالي تلقائياً
+  loadSpecialistsIntoSelect('follow-specialist', currentSpecialistId);
+
+  document.getElementById('follow-specialist').addEventListener('change', function() {
+    loadFollowSchedules(this.value);
+  });
+  document.getElementById('follow-date').addEventListener('change', function() {
+    loadFollowSlots(this.value);
+  });
+  document.getElementById('submit-follow-up').addEventListener('click', async function() {
+    const msg = document.getElementById('follow-msg');
+    const slotId = document.getElementById('follow-time').value;
+    if (!slotId) {
+      msg.textContent = 'الرجاء اختيار الساعة';
+      return;
+    }
+    try {
+      await apiCall('/reservations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_id: slotId,
+          nin: patient.nin,
+          first_name: patient.firstName,
+          last_name: patient.lastName,
+          dob: patient.dob,
+          letter_base64: null
+        })
+      });
+      msg.textContent = 'تم حجز المتابعة بنجاح';
+      // بعد لحظة يمكن إغلاق النافذة
+    } catch (err) {
+      let errorMsg = err.message;
+      try { const e = JSON.parse(err.message); errorMsg = e.error || errorMsg; } catch (e) {}
+      msg.textContent = 'فشل: ' + errorMsg;
+    }
+  });
+}
+
+// ====== ربط أحداث الأزرار في الجداول ======
+function attachModalEvents() {
+  document.querySelectorAll('.view-letter-btn').forEach(btn => {
+    btn.onclick = function() { viewLetter(this.dataset.reservationId); };
+  });
+  document.querySelectorAll('.follow-up-btn').forEach(btn => {
+    btn.onclick = function() {
+      const reservation = currentReservations.find(r => r.id == this.dataset.reservationId);
+      if (reservation) showFollowUpModal(reservation);
+    };
+  });
 }
 
 // ====== Initial load ======
