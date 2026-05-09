@@ -21,7 +21,7 @@ let currentReservations = [];
 let currentSpecialistId = null;
 let pendingBookingData = null;
 
-// ====== NIN Validation (background) ======
+// ====== NIN Validation ======
 function validateNIN(nin) {
   if (!/^\d{18}$/.test(nin)) return { valid: false, error: 'رقم التعريف يجب أن يتكون من 18 رقماً' };
   const genderCode = nin.substring(0, 3);
@@ -117,7 +117,7 @@ document.getElementById('date-select').addEventListener('change', async function
   slots.forEach(s => timeS.innerHTML += `<option value="${s.id}">${s.start_time}</option>`);
 });
 
-// ====== Age -> show parent fields ======
+// ====== Age -> parent fields ======
 document.getElementById('dob').addEventListener('change', function() {
   const age = getAge(this.value);
   const parentFields = document.querySelectorAll('.parent-fields');
@@ -164,28 +164,46 @@ document.getElementById('terms-reject').addEventListener('click', () => {
   document.getElementById('booking-msg').textContent = 'يجب الموافقة على الشروط لإتمام الحجز';
 });
 
+// ====== Show Ticket Modal ======
+function showTicketModal(ticket) {
+  const html = `
+    <div class="text-center">
+      <h3 class="text-xl font-bold mb-4 text-cyan-800">تم الحجز بنجاح</h3>
+      <div class="bg-gray-100 p-4 rounded-lg text-right">
+        <p><strong>رقم التسلسل:</strong> ${ticket.id}</p>
+        <p><strong>الطبيب:</strong> ${ticket.doctor_name}</p>
+        <p><strong>مكان الفحص:</strong> ${ticket.location || 'غير محدد'}</p>
+        <p><strong>التاريخ:</strong> ${ticket.date}</p>
+        <p><strong>الساعة:</strong> ${ticket.time}</p>
+        <p><strong>المريض:</strong> ${ticket.patient}</p>
+      </div>
+      <button id="close-ticket-btn" class="mt-4 bg-cyan-600 text-white px-6 py-2 rounded-lg">حسناً</button>
+    </div>
+  `;
+  showModal(html);
+  document.getElementById('close-ticket-btn').addEventListener('click', () => {
+    document.getElementById('modal-overlay').classList.add('hidden');
+  });
+}
+
 // ====== Submit booking form ======
 document.getElementById('booking-form').addEventListener('submit', async function(e) {
   e.preventDefault();
   const msg = document.getElementById('booking-msg');
   msg.textContent = '';
 
-  // Validate NIN
   const nin = document.getElementById('nin').value.trim();
   const ninCheck = validateNIN(nin);
   if (!ninCheck.valid) return msg.textContent = ninCheck.error;
 
-  // Validate Arabic names
   const fname = document.getElementById('first-name').value.trim();
   const lname = document.getElementById('last-name').value.trim();
   if (!isArabic(fname) || !isArabic(lname)) return msg.textContent = 'الاسم واللقب يجب أن يكونا بالحروف العربية فقط';
 
-  // DOB vs NIN year
   const dob = document.getElementById('dob').value;
   if (!dob) return msg.textContent = 'الرجاء إدخال تاريخ الميلاد';
   if (new Date(dob).getFullYear() !== ninCheck.birthYear) return msg.textContent = 'تاريخ الميلاد لا يتطابق مع رقم التعريف الوطني';
 
-  // Age & parent
   const age = getAge(dob);
   if (age < 18) {
     const pnin = document.getElementById('parent-nin').value.trim();
@@ -196,7 +214,6 @@ document.getElementById('booking-form').addEventListener('submit', async functio
     if (!document.getElementById('parent-dob').value) return msg.textContent = 'الرجاء إدخال تاريخ ميلاد ولي الأمر';
   }
 
-  // Check previous reservation for this NIN (public only)
   try {
     const existing = await apiCall(`/check-reservation?nin=${encodeURIComponent(nin)}`);
     if (existing.count > 0) return msg.textContent = 'لديك حجز مسبق بالفعل';
@@ -236,17 +253,20 @@ async function submitBooking(data) {
   const msg = document.getElementById('booking-msg');
   msg.textContent = 'جاري الحجز...';
   try {
-    await apiCall('/reservations', {
+    const result = await apiCall('/reservations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    msg.textContent = 'تم الحجز بنجاح!';
+    // عرض التذكرة
+    showTicketModal(result);
+    // إعادة تعيين النموذج
     document.getElementById('booking-form').reset();
     document.getElementById('date-select').innerHTML = '<option value="">اختر التاريخ</option>';
     document.getElementById('time-select').innerHTML = '<option value="">اختر الساعة</option>';
     document.querySelectorAll('.parent-fields').forEach(f => f.classList.add('hidden'));
     pendingBookingData = null;
+    msg.textContent = '';
   } catch (err) {
     let e = err.message;
     try { e = JSON.parse(err.message).error || e; } catch (_) {}
@@ -271,7 +291,7 @@ document.getElementById('admin-logout').addEventListener('click', () => {
   showPublicView();
 });
 
-// Admin tabs
+// ====== Admin tabs ======
 document.querySelectorAll('.admin-tab-btn').forEach(btn => {
   btn.addEventListener('click', function() {
     document.querySelectorAll('.admin-tab-btn').forEach(b => {
@@ -286,9 +306,6 @@ document.querySelectorAll('.admin-tab-btn').forEach(btn => {
   });
 });
 
-// ... (Admin CRUD functions identical to previous full answer, I'll omit for brevity but they must be included as in prior full script.js)
-// I will paste the whole admin & specialist sections now to avoid omission.
-
 async function loadAdminSpecialists() {
   const content = document.getElementById('admin-content');
   try {
@@ -296,10 +313,10 @@ async function loadAdminSpecialists() {
     allSpecialists = data;
     let html = `<h3 class="text-lg font-bold mb-4">قائمة الأخصائيين</h3>`;
     html += `<button onclick="showSpecialistForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة أخصائي</button>`;
-    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الاسم</th><th class="p-2 border">التخصص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
+    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الاسم</th><th class="p-2 border">التخصص</th><th class="p-2 border">مكان الفحص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
     data.forEach(s => {
-      html += `<tr><td class="p-2 border">${s.name}</td><td class="p-2 border">${s.specialty || ''}</td><td class="p-2 border">
-        <button onclick="editSpecialist(${s.id}, '${s.name}', '${s.specialty || ''}')" class="text-blue-600 mr-2">تعديل</button>
+      html += `<tr><td class="p-2 border">${s.name}</td><td class="p-2 border">${s.specialty || ''}</td><td class="p-2 border">${s.location || ''}</td><td class="p-2 border">
+        <button onclick="editSpecialist(${s.id}, '${s.name}', '${s.specialty || ''}', '${s.location || ''}')" class="text-blue-600 mr-2">تعديل</button>
         <button onclick="deleteSpecialist(${s.id})" class="text-red-600">حذف</button>
       </td></tr>`;
     });
@@ -308,13 +325,14 @@ async function loadAdminSpecialists() {
   } catch (e) { content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`; }
 }
 
-function showSpecialistForm(id = null, name = '', specialty = '') {
+function showSpecialistForm(id = null, name = '', specialty = '', location = '') {
   const container = document.getElementById('specialist-form-container');
   const isEdit = id !== null;
   container.innerHTML = `
     <form onsubmit="saveSpecialist(event, ${id})" class="space-y-3 bg-gray-50 p-4 rounded">
       <input type="text" id="s-name" value="${name}" placeholder="الاسم" required class="w-full border p-2 rounded" />
       <input type="text" id="s-specialty" value="${specialty}" placeholder="التخصص" class="w-full border p-2 rounded" />
+      <input type="text" id="s-location" value="${location}" placeholder="مكان الفحص (مثلاً: قاعة 5، الطابق الثاني)" class="w-full border p-2 rounded" />
       <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">${isEdit ? 'تعديل' : 'إضافة'}</button>
       <button type="button" onclick="loadAdminSpecialists()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
     </form>
@@ -325,17 +343,18 @@ async function saveSpecialist(e, id) {
   e.preventDefault();
   const name = document.getElementById('s-name').value.trim();
   const specialty = document.getElementById('s-specialty').value.trim();
+  const location = document.getElementById('s-location').value.trim();
   try {
     if (id) {
-      await apiCall(`/specialists/${id}`, { method: 'PUT', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty}) });
+      await apiCall(`/specialists/${id}`, { method: 'PUT', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty, location}) });
     } else {
-      await apiCall('/specialists', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty}) });
+      await apiCall('/specialists', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty, location}) });
     }
     loadAdminSpecialists();
   } catch (e) { alert('خطأ: ' + e.message); }
 }
 
-async function editSpecialist(id, name, specialty) { showSpecialistForm(id, name, specialty); }
+async function editSpecialist(id, name, specialty, location) { showSpecialistForm(id, name, specialty, location); }
 async function deleteSpecialist(id) {
   if (!confirm('هل أنت متأكد من حذف الأخصائي؟')) return;
   try {
@@ -343,6 +362,9 @@ async function deleteSpecialist(id) {
     loadAdminSpecialists();
   } catch (e) { alert('خطأ: ' + e.message); }
 }
+
+// ... (تابع دوال المسؤول والأخصائي كما في السابق ولكن مع تضمين location في الجداول) ...
+// سأكمل الدوال المتبقية
 
 async function loadAdminSchedules() {
   const content = document.getElementById('admin-content');
@@ -570,7 +592,7 @@ function showFollowUpModal(reservation) {
     const slotId = document.getElementById('follow-time').value;
     if (!slotId) return msg.textContent = 'الرجاء اختيار الساعة';
     try {
-      await apiCall('/reservations', {
+      const res = await apiCall('/reservations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -582,6 +604,8 @@ function showFollowUpModal(reservation) {
           letter_base64: null
         })
       });
+      // عرض تذكرة المتابعة
+      showTicketModal(res);
       msg.textContent = 'تم حجز المتابعة بنجاح';
     } catch (err) {
       let errorMsg = err.message;
@@ -603,5 +627,5 @@ function attachModalEvents() {
 document.getElementById('admin-login-overlay').addEventListener('click', function(e) { if (e.target === this) this.classList.add('hidden'); });
 document.getElementById('specialist-login-overlay').addEventListener('click', function(e) { if (e.target === this) this.classList.add('hidden'); });
 
-// Start
+// start
 loadSpecialists();
