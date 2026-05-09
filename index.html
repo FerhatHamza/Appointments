@@ -1,15 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>حجز المواعيد – المؤسسة العمومية للصحة الحوارية ببريان</title>
-  <!-- Tailwind CSS (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Google Font: Tajawal -->
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
-  <!-- Custom CSS -->
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="font-[Tajawal] bg-gray-50 text-gray-800 min-h-screen flex flex-col">
@@ -21,42 +17,57 @@
         <h1 class="text-lg sm:text-xl font-bold text-cyan-800">المؤسسة العمومية للصحة الحوارية ببريان</h1>
         <h2 class="text-base sm:text-lg font-medium text-cyan-700">المؤسسة العمومية الاستشفائية ببريان</h2>
       </div>
+      <div class="hidden sm:flex gap-2 mt-2 sm:mt-0">
+        <button id="header-admin-btn" class="text-xs text-gray-400 hover:text-cyan-600">دخول المسؤول</button>
+        <span class="text-gray-300">|</span>
+        <button id="header-specialist-btn" class="text-xs text-gray-400 hover:text-cyan-600">دخول الأخصائي</button>
+      </div>
     </div>
   </header>
 
   <!-- Main Content -->
   <main class="flex-1 max-w-5xl mx-auto px-4 py-8 w-full">
-    <!-- Tab Navigation (public view) -->
+    
+    <!-- Public Booking View -->
     <div id="public-view">
-      <div class="flex justify-center mb-8 space-x-2 space-x-reverse">
-        <button id="tab-booking" class="tab-btn active px-6 py-3 bg-cyan-600 text-white rounded-t-lg">حجز موعد</button>
-        <button id="tab-admin" class="tab-btn px-6 py-3 bg-gray-200 rounded-t-lg">دخول المسؤول</button>
-        <button id="tab-specialist" class="tab-btn px-6 py-3 bg-gray-200 rounded-t-lg">دخول الأخصائي</button>
-      </div>
-
-      <!-- Booking Form -->
       <section id="booking-section" class="bg-white p-6 rounded-xl shadow-md">
         <h3 class="text-xl font-bold mb-6 text-cyan-800 border-b pb-2">نموذج حجز موعد</h3>
         <form id="booking-form" class="space-y-5">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="block font-medium mb-1">رقم التعريف الوطني (NIN)</label>
-              <input type="text" id="nin" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+              <label class="block font-medium mb-1">رقم التعريف الوطني (NIN) <span class="text-xs text-gray-400">18 رقم</span></label>
+              <input type="text" id="nin" maxlength="18" inputmode="numeric" pattern="[0-9]*" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
             </div>
             <div>
               <label class="block font-medium mb-1">الاسم</label>
-              <input type="text" id="first-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+              <input type="text" id="first-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none arabic-only" />
             </div>
             <div>
               <label class="block font-medium mb-1">اللقب</label>
-              <input type="text" id="last-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+              <input type="text" id="last-name" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none arabic-only" />
             </div>
             <div>
               <label class="block font-medium mb-1">تاريخ الميلاد</label>
               <input type="date" id="dob" required class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
             </div>
+            <div class="parent-fields hidden">
+              <label class="block font-medium mb-1">رقم تعريف ولي الأمر (NIN)</label>
+              <input type="text" id="parent-nin" maxlength="18" inputmode="numeric" pattern="[0-9]*" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
+            <div class="parent-fields hidden">
+              <label class="block font-medium mb-1">اسم ولي الأمر</label>
+              <input type="text" id="parent-first-name" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none arabic-only" />
+            </div>
+            <div class="parent-fields hidden">
+              <label class="block font-medium mb-1">لقب ولي الأمر</label>
+              <input type="text" id="parent-last-name" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none arabic-only" />
+            </div>
+            <div class="parent-fields hidden">
+              <label class="block font-medium mb-1">تاريخ ميلاد ولي الأمر</label>
+              <input type="date" id="parent-dob" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+            </div>
             <div>
-              <label class="block font-medium mb-1">رسالة التوجيه (صورة)</label>
+              <label class="block font-medium mb-1">رسالة التوجيه (صورة) <span class="text-xs text-gray-400">الحد الأقصى 5 ميغا</span></label>
               <input type="file" id="letter" accept="image/*" capture="environment" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
             </div>
             <div>
@@ -82,29 +93,9 @@
           <p id="booking-msg" class="text-center text-sm mt-2"></p>
         </form>
       </section>
-
-      <!-- Admin Login (hidden initially) -->
-      <section id="admin-login-section" class="hidden bg-white p-6 rounded-xl shadow-md">
-        <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول المسؤول</h3>
-        <div class="flex items-center gap-3">
-          <input type="password" id="admin-password" placeholder="كلمة المرور" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
-          <button id="admin-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
-        </div>
-        <p id="admin-login-msg" class="text-sm mt-2"></p>
-      </section>
-
-      <!-- Specialist Login (hidden initially) -->
-      <section id="specialist-login-section" class="hidden bg-white p-6 rounded-xl shadow-md">
-        <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول الأخصائي</h3>
-        <div class="flex items-center gap-3">
-          <input type="text" id="specialist-token" placeholder="رمز الدخول" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
-          <button id="specialist-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
-        </div>
-        <p id="specialist-login-msg" class="text-sm mt-2"></p>
-      </section>
     </div>
 
-    <!-- Admin Dashboard (hidden, shown after login) -->
+    <!-- Admin Dashboard (hidden) -->
     <div id="admin-dashboard" class="hidden">
       <div class="flex justify-between items-center mb-6">
         <h2 class="text-2xl font-bold text-cyan-800">لوحة تحكم المسؤول</h2>
@@ -134,15 +125,54 @@
     <p>تطوير <span class="font-bold">Ing. Ferhat H.</span></p>
     <p class="text-sm opacity-80">© 2026 المؤسسة العمومية للصحة الحوارية ببريان</p>
   </footer>
-  <!-- Modal -->
+
+  <!-- Terms Modal -->
+  <div id="terms-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-screen overflow-y-auto mx-4">
+      <h3 class="text-xl font-bold mb-4 text-cyan-800">شروط الاستخدام</h3>
+      <div class="text-sm text-gray-700 space-y-3 mb-6">
+        <p>أوافق على أن تُستخدم معطياتي التي سيتم جمعها في عملية التسجيل، من طرف المؤسسة العمومية للصحة الجوارية ببريان لغرض تحيين المنصة الوطنية للموارد البشرية، كما يتم الاحتفاظ بها واستغلالها/معالجتها طوال مدة استغلال هذه المنصة الرقمية، كما تُستعمل كذلك في جميع العمليات الإدارية المتعلقة بتسير الموارد البشرية.</p>
+        <p>ويتم ذلك طبقًا لأحكام القانون 18-07 المؤرخ 10 يونيو 2018 المتعلق بحماية الأشخاص الطبيعيين في مجال معالجة المعطيات ذات الطابع الشخصي، وأعلم بأن لي الحق في الاطلاع على هذه المعطيات وطلب تصحيحها أو الاعتراض على معالجتها وفقًا للقانون سالف الذكر.</p>
+      </div>
+      <div class="flex justify-end gap-3">
+        <button id="terms-reject" class="px-6 py-2 bg-gray-300 rounded-lg">رفض</button>
+        <button id="terms-accept" class="px-6 py-2 bg-cyan-600 text-white rounded-lg">أوافق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic Modal -->
   <div id="modal-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
-    <div id="modal-box" class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-screen overflow-y-auto relative">
+    <div id="modal-box" class="bg-white rounded-xl p-6 max-w-2xl w-full max-h-screen overflow-y-auto relative mx-4">
       <button id="modal-close" class="absolute top-2 left-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
       <div id="modal-body"></div>
     </div>
   </div>
-  
-  <!-- Custom JavaScript -->
+
+  <!-- Admin Login Modal -->
+  <div id="admin-login-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+      <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول المسؤول</h3>
+      <div class="flex items-center gap-3">
+        <input type="password" id="admin-password" placeholder="كلمة المرور" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+        <button id="admin-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
+      </div>
+      <p id="admin-login-msg" class="text-sm mt-2"></p>
+    </div>
+  </div>
+
+  <!-- Specialist Login Modal -->
+  <div id="specialist-login-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+      <h3 class="text-xl font-bold mb-4 text-cyan-800">دخول الأخصائي</h3>
+      <div class="flex items-center gap-3">
+        <input type="text" id="specialist-token" placeholder="رمز الدخول" class="flex-1 border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none" />
+        <button id="specialist-login-btn" class="bg-cyan-600 text-white px-6 py-3 rounded-lg hover:bg-cyan-700">دخول</button>
+      </div>
+      <p id="specialist-login-msg" class="text-sm mt-2"></p>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
