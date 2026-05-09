@@ -252,7 +252,7 @@ document.getElementById('booking-form').addEventListener('submit', async functio
   let letterBase64 = null;
   const file = document.getElementById('letter').files[0];
   if (file) {
-    if (file.size > 5 * 1024 * 1024) return msg.textContent = 'حجم الصورة كبير جداً (الحد الأقصى 5 ميغابايت)';
+    if (file.size > 700 * 1024) return msg.textContent = 'حجم الصورة كبير جداً (الحد الأقصى 700 كيلوبايت)';
     letterBase64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
