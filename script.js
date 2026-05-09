@@ -17,6 +17,7 @@ const adminPassword = 'admin123';
 let currentAdminPassword = null;
 let specialistToken = null;
 let allSpecialists = [];
+let allSchedules = []; // لتخزين الجداول المحملة مؤقتاً
 let currentReservations = [];
 let currentSpecialistId = null;
 let pendingBookingData = null;
@@ -97,24 +98,50 @@ async function loadSpecialists() {
   });
 }
 
+// عند تغيير الأخصائي: تحميل جداوله
 document.getElementById('specialist-select').addEventListener('change', async function() {
   const sid = this.value;
   const dateS = document.getElementById('date-select');
   const timeS = document.getElementById('time-select');
+  const dateLoc = document.getElementById('date-location');
   dateS.innerHTML = '<option value="">اختر التاريخ</option>';
   timeS.innerHTML = '<option value="">اختر الساعة</option>';
+  dateLoc.classList.add('hidden');
+  allSchedules = [];
   if (!sid) return;
-  const scheds = await apiCall(`/schedules?specialist_id=${sid}`);
-  scheds.forEach(s => dateS.innerHTML += `<option value="${s.id}">${s.date}</option>`);
+  try {
+    allSchedules = await apiCall(`/schedules?specialist_id=${sid}`);
+    dateS.innerHTML = '<option value="">اختر التاريخ</option>';
+    allSchedules.forEach(s => {
+      dateS.innerHTML += `<option value="${s.id}">${s.date}</option>`;
+    });
+  } catch (e) {
+    alert('خطأ في تحميل الجداول: ' + e.message);
+  }
 });
 
-document.getElementById('date-select').addEventListener('change', async function() {
+// عند اختيار تاريخ: عرض المكان
+document.getElementById('date-select').addEventListener('change', function() {
   const schId = this.value;
   const timeS = document.getElementById('time-select');
+  const dateLoc = document.getElementById('date-location');
   timeS.innerHTML = '<option value="">اختر الساعة</option>';
-  if (!schId) return;
-  const slots = await apiCall(`/slots?schedule_id=${schId}&available=1`);
-  slots.forEach(s => timeS.innerHTML += `<option value="${s.id}">${s.start_time}</option>`);
+  if (!schId) {
+    dateLoc.classList.add('hidden');
+    return;
+  }
+  const schedule = allSchedules.find(s => s.id == schId);
+  if (schedule && schedule.location) {
+    dateLoc.textContent = `مكان الفحص: ${schedule.location}`;
+    dateLoc.classList.remove('hidden');
+  } else {
+    dateLoc.classList.add('hidden');
+  }
+  // تحميل الفترات المتاحة
+  apiCall(`/slots?schedule_id=${schId}&available=1`).then(slots => {
+    timeS.innerHTML = '<option value="">اختر الساعة</option>';
+    slots.forEach(s => timeS.innerHTML += `<option value="${s.id}">${s.start_time}</option>`);
+  }).catch(e => alert('خطأ في تحميل الأوقات: ' + e.message));
 });
 
 // ====== Age -> parent fields ======
@@ -258,12 +285,11 @@ async function submitBooking(data) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    // عرض التذكرة
     showTicketModal(result);
-    // إعادة تعيين النموذج
     document.getElementById('booking-form').reset();
     document.getElementById('date-select').innerHTML = '<option value="">اختر التاريخ</option>';
     document.getElementById('time-select').innerHTML = '<option value="">اختر الساعة</option>';
+    document.getElementById('date-location').classList.add('hidden');
     document.querySelectorAll('.parent-fields').forEach(f => f.classList.add('hidden'));
     pendingBookingData = null;
     msg.textContent = '';
@@ -313,10 +339,10 @@ async function loadAdminSpecialists() {
     allSpecialists = data;
     let html = `<h3 class="text-lg font-bold mb-4">قائمة الأخصائيين</h3>`;
     html += `<button onclick="showSpecialistForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة أخصائي</button>`;
-    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الاسم</th><th class="p-2 border">التخصص</th><th class="p-2 border">مكان الفحص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
+    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الاسم</th><th class="p-2 border">التخصص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
     data.forEach(s => {
-      html += `<tr><td class="p-2 border">${s.name}</td><td class="p-2 border">${s.specialty || ''}</td><td class="p-2 border">${s.location || ''}</td><td class="p-2 border">
-        <button onclick="editSpecialist(${s.id}, '${s.name}', '${s.specialty || ''}', '${s.location || ''}')" class="text-blue-600 mr-2">تعديل</button>
+      html += `<tr><td class="p-2 border">${s.name}</td><td class="p-2 border">${s.specialty || ''}</td><td class="p-2 border">
+        <button onclick="editSpecialist(${s.id}, '${s.name}', '${s.specialty || ''}')" class="text-blue-600 mr-2">تعديل</button>
         <button onclick="deleteSpecialist(${s.id})" class="text-red-600">حذف</button>
       </td></tr>`;
     });
@@ -325,14 +351,13 @@ async function loadAdminSpecialists() {
   } catch (e) { content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`; }
 }
 
-function showSpecialistForm(id = null, name = '', specialty = '', location = '') {
+function showSpecialistForm(id = null, name = '', specialty = '') {
   const container = document.getElementById('specialist-form-container');
   const isEdit = id !== null;
   container.innerHTML = `
     <form onsubmit="saveSpecialist(event, ${id})" class="space-y-3 bg-gray-50 p-4 rounded">
       <input type="text" id="s-name" value="${name}" placeholder="الاسم" required class="w-full border p-2 rounded" />
       <input type="text" id="s-specialty" value="${specialty}" placeholder="التخصص" class="w-full border p-2 rounded" />
-      <input type="text" id="s-location" value="${location}" placeholder="مكان الفحص (مثلاً: قاعة 5، الطابق الثاني)" class="w-full border p-2 rounded" />
       <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">${isEdit ? 'تعديل' : 'إضافة'}</button>
       <button type="button" onclick="loadAdminSpecialists()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
     </form>
@@ -343,18 +368,17 @@ async function saveSpecialist(e, id) {
   e.preventDefault();
   const name = document.getElementById('s-name').value.trim();
   const specialty = document.getElementById('s-specialty').value.trim();
-  const location = document.getElementById('s-location').value.trim();
   try {
     if (id) {
-      await apiCall(`/specialists/${id}`, { method: 'PUT', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty, location}) });
+      await apiCall(`/specialists/${id}`, { method: 'PUT', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty}) });
     } else {
-      await apiCall('/specialists', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty, location}) });
+      await apiCall('/specialists', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({name, specialty}) });
     }
     loadAdminSpecialists();
   } catch (e) { alert('خطأ: ' + e.message); }
 }
 
-async function editSpecialist(id, name, specialty, location) { showSpecialistForm(id, name, specialty, location); }
+async function editSpecialist(id, name, specialty) { showSpecialistForm(id, name, specialty); }
 async function deleteSpecialist(id) {
   if (!confirm('هل أنت متأكد من حذف الأخصائي؟')) return;
   try {
@@ -363,19 +387,18 @@ async function deleteSpecialist(id) {
   } catch (e) { alert('خطأ: ' + e.message); }
 }
 
-// ... (تابع دوال المسؤول والأخصائي كما في السابق ولكن مع تضمين location في الجداول) ...
-// سأكمل الدوال المتبقية
-
+// ----- Schedules Admin -----
 async function loadAdminSchedules() {
   const content = document.getElementById('admin-content');
   try {
     const scheds = await apiCall('/schedules', { headers: { 'x-admin-password': currentAdminPassword } });
+    allSchedules = scheds; // خزّن الجداول لاستعمالها لاحقاً
     let html = `<h3 class="text-lg font-bold mb-4">الجداول</h3>`;
     html += `<button onclick="showScheduleForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة جدول</button>`;
-    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
+    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">مكان الفحص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
     for (let s of scheds) {
       const spec = allSpecialists.find(sp => sp.id === s.specialist_id) || { name: 'غير معروف' };
-      html += `<tr><td class="p-2 border">${spec.name}</td><td class="p-2 border">${s.date}</td><td class="p-2 border">
+      html += `<tr><td class="p-2 border">${spec.name}</td><td class="p-2 border">${s.date}</td><td class="p-2 border">${s.location || '--'}</td><td class="p-2 border">
         <button onclick="deleteSchedule(${s.id})" class="text-red-600">حذف</button>
       </td></tr>`;
     }
@@ -392,6 +415,7 @@ function showScheduleForm() {
     <form onsubmit="saveSchedule(event)" class="space-y-3 bg-gray-50 p-4 rounded">
       <select id="sched-specialist" class="w-full border p-2 rounded">${options}</select>
       <input type="date" id="sched-date" required class="w-full border p-2 rounded" />
+      <input type="text" id="sched-location" placeholder="مكان الفحص (مثلاً: قاعة 5، الطابق الثاني)" class="w-full border p-2 rounded" />
       <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">إضافة</button>
       <button type="button" onclick="loadAdminSchedules()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
     </form>
@@ -402,8 +426,9 @@ async function saveSchedule(e) {
   e.preventDefault();
   const specialist_id = document.getElementById('sched-specialist').value;
   const date = document.getElementById('sched-date').value;
+  const location = document.getElementById('sched-location').value.trim();
   try {
-    await apiCall('/schedules', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({specialist_id, date}) });
+    await apiCall('/schedules', { method: 'POST', headers: { 'Content-Type':'application/json', 'x-admin-password':currentAdminPassword }, body: JSON.stringify({specialist_id, date, location}) });
     loadAdminSchedules();
   } catch (e) { alert('خطأ: ' + e.message); }
 }
@@ -416,6 +441,7 @@ async function deleteSchedule(id) {
   } catch (e) { alert('خطأ: ' + e.message); }
 }
 
+// ----- Reservations Admin (unchanged but location now comes from schedules) -----
 async function loadAdminReservations() {
   const content = document.getElementById('admin-content');
   try {
@@ -480,9 +506,7 @@ document.getElementById('specialist-login-btn').addEventListener('click', async 
     specialistToken = token;
     document.getElementById('specialist-token').value = '';
     showSpecialistDashboard();
-  } catch (e) {
-    msg.textContent = 'الرمز غير صحيح أو منتهي الصلاحية';
-  }
+  } catch (e) { msg.textContent = 'الرمز غير صحيح أو منتهي الصلاحية'; }
 });
 document.getElementById('specialist-logout').addEventListener('click', () => {
   specialistToken = null;
@@ -604,7 +628,6 @@ function showFollowUpModal(reservation) {
           letter_base64: null
         })
       });
-      // عرض تذكرة المتابعة
       showTicketModal(res);
       msg.textContent = 'تم حجز المتابعة بنجاح';
     } catch (err) {
