@@ -1,635 +1,209 @@
-// ====== Anti-inspect & DevTools protection ======
-document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && (e.key === 'u' || e.key === 'U' || e.key === 's' || e.key === 'S')) e.preventDefault();
-  if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I' || e.key === 'j' || e.key === 'J')) e.preventDefault();
-  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'C')) e.preventDefault();
-});
-(function() {
-  const element = new Image();
-  Object.defineProperty(element, 'id', { get: function() { window.location.href = 'about:blank'; } });
-  console.log(element);
-}());
+const ADMIN_PASSWORD = 'admin123';
 
-// ====== Configuration ======
-const API_BASE = '/api';
-
-// ====== State ======
-const adminPassword = 'admin123';
-let currentAdminPassword = null;
-let specialistToken = null;
-let allSpecialists = [];
-let currentReservations = []; // لتخزين الحجوزات المُحمّلة حديثاً
-let currentSpecialistId = null; // ID الأخصائي بعد تسجيل الدخول
-
-// ====== Helper to call API ======
-async function apiCall(url, options = {}) {
-  const res = await fetch(API_BASE + url, options);
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err);
+function generateTimeSlots() {
+  const slots = [];
+  const startMinutes = 8 * 60 + 30;
+  const endMinutes = 14 * 60;
+  for (let m = startMinutes; m <= endMinutes - 20; m += 20) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    slots.push(hh + ':' + mm);
   }
-  return res.json();
+  return slots;
 }
 
-// ====== Show/hide sections ======
-function showPublicView() {
-  document.getElementById('public-view').classList.remove('hidden');
-  document.getElementById('admin-dashboard').classList.add('hidden');
-  document.getElementById('specialist-dashboard').classList.add('hidden');
-}
-function showAdminDashboard() {
-  document.getElementById('public-view').classList.add('hidden');
-  document.getElementById('admin-dashboard').classList.remove('hidden');
-  document.getElementById('specialist-dashboard').classList.add('hidden');
-  loadAdminSpecialists();
-}
-function showSpecialistDashboard() {
-  document.getElementById('public-view').classList.add('hidden');
-  document.getElementById('admin-dashboard').classList.add('hidden');
-  document.getElementById('specialist-dashboard').classList.remove('hidden');
-  loadSpecialistReservations();
+function isAdmin(request) {
+  const pass = request.headers.get('x-admin-password');
+  return pass === ADMIN_PASSWORD;
 }
 
-// ====== Public tab switching ======
-document.getElementById('tab-booking').addEventListener('click', () => {
-  document.getElementById('booking-section').classList.remove('hidden');
-  document.getElementById('admin-login-section').classList.add('hidden');
-  document.getElementById('specialist-login-section').classList.add('hidden');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-booking').classList.add('active');
-});
-document.getElementById('tab-admin').addEventListener('click', () => {
-  document.getElementById('booking-section').classList.add('hidden');
-  document.getElementById('admin-login-section').classList.remove('hidden');
-  document.getElementById('specialist-login-section').classList.add('hidden');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-admin').classList.add('active');
-});
-document.getElementById('tab-specialist').addEventListener('click', () => {
-  document.getElementById('booking-section').classList.add('hidden');
-  document.getElementById('admin-login-section').classList.add('hidden');
-  document.getElementById('specialist-login-section').classList.remove('hidden');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-specialist').classList.add('active');
-});
+export async function onRequest(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const method = request.method;
 
-// ====== Load specialists for booking ======
-async function loadSpecialists() {
-  const data = await apiCall('/specialists');
-  allSpecialists = data;
-  const select = document.getElementById('specialist-select');
-  select.innerHTML = '<option value="">اختر الأخصائي</option>';
-  data.forEach(s => {
-    select.innerHTML += `<option value="${s.id}">${s.name}${s.specialty ? ' - ' + s.specialty : ''}</option>`;
-  });
-}
-
-// ====== Load schedules for selected specialist (booking) ======
-document.getElementById('specialist-select').addEventListener('change', async function() {
-  const specialistId = this.value;
-  const dateSelect = document.getElementById('date-select');
-  const timeSelect = document.getElementById('time-select');
-  dateSelect.innerHTML = '<option value="">اختر التاريخ</option>';
-  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
-  if (!specialistId) return;
-
-  try {
-    const scheds = await apiCall(`/schedules?specialist_id=${specialistId}`);
-    dateSelect.innerHTML = '<option value="">اختر التاريخ</option>';
-    scheds.forEach(s => {
-      dateSelect.innerHTML += `<option value="${s.id}">${s.date}</option>`;
-    });
-  } catch (e) {
-    alert('خطأ في تحميل الجداول: ' + e.message);
-  }
-});
-
-// ====== Load available slots for selected schedule (booking) ======
-document.getElementById('date-select').addEventListener('change', async function() {
-  const scheduleId = this.value;
-  const timeSelect = document.getElementById('time-select');
-  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
-  if (!scheduleId) return;
-
-  try {
-    const slots = await apiCall(`/slots?schedule_id=${scheduleId}&available=1`);
-    timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
-    slots.forEach(slot => {
-      timeSelect.innerHTML += `<option value="${slot.id}">${slot.start_time}</option>`;
-    });
-  } catch (e) {
-    alert('خطأ في تحميل الأوقات: ' + e.message);
-  }
-});
-
-// ====== Submit booking ======
-document.getElementById('booking-form').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  const msg = document.getElementById('booking-msg');
-  msg.textContent = 'جاري الحجز...';
-
-  const slotId = document.getElementById('time-select').value;
-  if (!slotId) {
-    msg.textContent = 'الرجاء اختيار الساعة';
-    return;
-  }
-
-  let letterBase64 = null;
-  const fileInput = document.getElementById('letter');
-  if (fileInput.files.length > 0) {
-    const file = fileInput.files[0];
-    if (file.size > 1024 * 1024) {
-      msg.textContent = 'حجم الصورة كبير جدًا (الحد الأقصى 1 ميغابايت)';
-      return;
-    }
-    try {
-      letterBase64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('فشل قراءة الملف'));
-        reader.readAsDataURL(file);
-      });
-    } catch (err) {
-      msg.textContent = 'خطأ في تحميل الصورة: ' + err.message;
-      return;
-    }
-  }
-
-  const body = {
-    slot_id: slotId,
-    nin: document.getElementById('nin').value.trim(),
-    first_name: document.getElementById('first-name').value.trim(),
-    last_name: document.getElementById('last-name').value.trim(),
-    dob: document.getElementById('dob').value,
-    letter_base64: letterBase64
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, x-admin-password',
   };
+  if (method === 'OPTIONS') {
+    return new Response(null, { headers });
+  }
+
+  if (!env.DB) {
+    return new Response(JSON.stringify({ error: 'Database binding missing' }), { status: 500, headers });
+  }
 
   try {
-    await apiCall('/reservations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    msg.textContent = 'تم الحجز بنجاح!';
-    document.getElementById('booking-form').reset();
-    document.getElementById('date-select').innerHTML = '<option value="">اختر التاريخ</option>';
-    document.getElementById('time-select').innerHTML = '<option value="">اختر الساعة</option>';
+    // === Specialists ===
+    if (path === '/api/specialists' && method === 'GET') {
+      const { results } = await env.DB.prepare('SELECT * FROM specialists').all();
+      return new Response(JSON.stringify(results), { headers: { ...headers, 'Content-Type': 'application/json' } });
+    }
+
+    if (path === '/api/specialists' && method === 'POST') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const { name, specialty } = await request.json();
+      await env.DB.prepare('INSERT INTO specialists (name, specialty) VALUES (?, ?)').bind(name, specialty || null).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    if (path.startsWith('/api/specialists/') && method === 'PUT') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const id = path.split('/')[3];
+      const { name, specialty } = await request.json();
+      await env.DB.prepare('UPDATE specialists SET name = ?, specialty = ? WHERE id = ?').bind(name, specialty || null, id).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    if (path.startsWith('/api/specialists/') && method === 'DELETE') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const id = path.split('/')[3];
+      await env.DB.prepare('DELETE FROM specialist_tokens WHERE specialist_id = ?').bind(id).run();
+      const schedules = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ?').bind(id).all();
+      for (const sched of schedules.results) {
+        await env.DB.prepare('DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE schedule_id = ?)').bind(sched.id).run();
+        await env.DB.prepare('DELETE FROM slots WHERE schedule_id = ?').bind(sched.id).run();
+      }
+      await env.DB.prepare('DELETE FROM schedules WHERE specialist_id = ?').bind(id).run();
+      await env.DB.prepare('DELETE FROM specialists WHERE id = ?').bind(id).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    // === Schedules ===
+    if (path === '/api/schedules' && method === 'GET') {
+      const specialistId = url.searchParams.get('specialist_id');
+      let query = 'SELECT * FROM schedules';
+      const params = [];
+      if (specialistId) {
+        query += ' WHERE specialist_id = ?';
+        params.push(specialistId);
+      }
+      const { results } = await env.DB.prepare(query).bind(...params).all();
+      return new Response(JSON.stringify(results), { headers });
+    }
+
+    if (path === '/api/schedules' && method === 'POST') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const { specialist_id, date } = await request.json();
+      const existing = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ? AND date = ?').bind(specialist_id, date).first();
+      if (existing) return new Response(JSON.stringify({ error: 'يوجد جدول بالفعل لهذا التاريخ' }), { status: 400, headers });
+      const info = await env.DB.prepare('INSERT INTO schedules (specialist_id, date) VALUES (?, ?)').bind(specialist_id, date).run();
+      const scheduleId = info.meta.last_row_id;
+      const slots = generateTimeSlots();
+      const stmt = env.DB.prepare('INSERT INTO slots (schedule_id, start_time) VALUES (?, ?)');
+      const batch = slots.map(time => stmt.bind(scheduleId, time));
+      await env.DB.batch(batch);
+      return new Response(JSON.stringify({ success: true, id: scheduleId }), { headers });
+    }
+
+    if (path.startsWith('/api/schedules/') && method === 'DELETE') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const id = path.split('/')[3];
+      await env.DB.prepare('DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE schedule_id = ?)').bind(id).run();
+      await env.DB.prepare('DELETE FROM slots WHERE schedule_id = ?').bind(id).run();
+      await env.DB.prepare('DELETE FROM schedules WHERE id = ?').bind(id).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    // === Slots ===
+    if (path === '/api/slots' && method === 'GET') {
+      const scheduleId = url.searchParams.get('schedule_id');
+      const available = url.searchParams.get('available');
+      if (!scheduleId) return new Response('Missing schedule_id', { status: 400 });
+      let query = 'SELECT * FROM slots WHERE schedule_id = ?';
+      const params = [scheduleId];
+      if (available === '1') query += ' AND is_reserved = 0';
+      const { results } = await env.DB.prepare(query).bind(...params).all();
+      return new Response(JSON.stringify(results), { headers });
+    }
+
+    // === Check reservation by NIN ===
+    if (path === '/api/check-reservation' && method === 'GET') {
+      const nin = url.searchParams.get('nin');
+      if (!nin) return new Response('Missing nin', { status: 400 });
+      const result = await env.DB.prepare('SELECT COUNT(*) as count FROM reservations WHERE patient_nin = ?').bind(nin).first();
+      return new Response(JSON.stringify(result), { headers });
+    }
+
+    // === Reservations ===
+    if (path === '/api/reservations' && method === 'GET') {
+      const showAll = url.searchParams.get('all') === 'true';
+      if (!showAll) return new Response(JSON.stringify([]), { headers });
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const { results } = await env.DB.prepare(`
+        SELECT r.*, s.start_time, sch.date, spec.name as specialist_name
+        FROM reservations r
+        JOIN slots s ON r.slot_id = s.id
+        JOIN schedules sch ON s.schedule_id = sch.id
+        JOIN specialists spec ON sch.specialist_id = spec.id
+        ORDER BY sch.date, s.start_time
+      `).all();
+      return new Response(JSON.stringify(results), { headers });
+    }
+
+    if (path === '/api/reservations' && method === 'POST') {
+      const { slot_id, nin, first_name, last_name, dob, letter_base64, parent_nin, parent_first_name, parent_last_name, parent_dob } = await request.json();
+      
+      // Check if NIN already has a reservation
+      const existing = await env.DB.prepare('SELECT id FROM reservations WHERE patient_nin = ?').bind(nin).first();
+      if (existing) return new Response(JSON.stringify({ error: 'لديك حجز مسبق بالفعل' }), { status: 409, headers });
+      
+      const slot = await env.DB.prepare('SELECT id FROM slots WHERE id = ? AND is_reserved = 0').bind(slot_id).first();
+      if (!slot) return new Response(JSON.stringify({ error: 'الوقت محجوز أو غير متوفر' }), { status: 409, headers });
+      
+      await env.DB.prepare(`
+        INSERT INTO reservations (slot_id, patient_nin, patient_first_name, patient_last_name, patient_dob, letter_base64, parent_nin, parent_first_name, parent_last_name, parent_dob)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(slot_id, nin, first_name, last_name, dob, letter_base64 || null, parent_nin || null, parent_first_name || null, parent_last_name || null, parent_dob || null).run();
+      
+      await env.DB.prepare('UPDATE slots SET is_reserved = 1 WHERE id = ?').bind(slot_id).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    if (path.startsWith('/api/reservations/') && method === 'DELETE') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const id = path.split('/')[3];
+      const reservation = await env.DB.prepare('SELECT slot_id FROM reservations WHERE id = ?').bind(id).first();
+      if (!reservation) return new Response('Not found', { status: 404 });
+      await env.DB.prepare('DELETE FROM reservations WHERE id = ?').bind(id).run();
+      await env.DB.prepare('UPDATE slots SET is_reserved = 0 WHERE id = ?').bind(reservation.slot_id).run();
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    // === Generate specialist token ===
+    if (path === '/api/generate-token' && method === 'POST') {
+      if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
+      const { specialist_id } = await request.json();
+      const token = crypto.randomUUID();
+      await env.DB.prepare('INSERT INTO specialist_tokens (specialist_id, token) VALUES (?, ?)').bind(specialist_id, token).run();
+      return new Response(JSON.stringify({ token }), { headers });
+    }
+
+    // === Specialist reservations by token ===
+    if (path === '/api/specialist-reservations' && method === 'GET') {
+      const token = url.searchParams.get('token');
+      if (!token) return new Response('Token missing', { status: 400 });
+      const tokenRow = await env.DB.prepare('SELECT specialist_id FROM specialist_tokens WHERE token = ?').bind(token).first();
+      if (!tokenRow) return new Response(JSON.stringify({ error: 'رمز غير صالح' }), { status: 403, headers });
+      const specialistId = tokenRow.specialist_id;
+      const { results } = await env.DB.prepare(`
+        SELECT r.*, s.start_time, sch.date, spec.name as specialist_name
+        FROM reservations r
+        JOIN slots s ON r.slot_id = s.id
+        JOIN schedules sch ON s.schedule_id = sch.id
+        JOIN specialists spec ON sch.specialist_id = spec.id
+        WHERE spec.id = ?
+        ORDER BY sch.date, s.start_time
+      `).bind(specialistId).all();
+      return new Response(JSON.stringify({ specialistId: specialistId, reservations: results }), { headers });
+    }
+
+    return new Response('Not Found', { status: 404, headers });
+
   } catch (err) {
-    let errorMsg = err.message;
-    try {
-      const jsonError = JSON.parse(err.message);
-      if (jsonError.error) errorMsg = jsonError.error;
-    } catch (e) {}
-    msg.textContent = 'فشل الحجز: ' + errorMsg;
-    console.error('Booking error:', err);
-  }
-});
-
-// ====== Admin Login ======
-document.getElementById('admin-login-btn').addEventListener('click', () => {
-  const pass = document.getElementById('admin-password').value.trim();
-  const msg = document.getElementById('admin-login-msg');
-  if (pass === adminPassword) {
-    currentAdminPassword = pass;
-    showAdminDashboard();
-  } else {
-    msg.textContent = 'كلمة المرور غير صحيحة';
-    msg.className = 'text-red-600 text-sm mt-2';
-  }
-});
-
-// ====== Admin Logout ======
-document.getElementById('admin-logout').addEventListener('click', () => {
-  currentAdminPassword = null;
-  showPublicView();
-  document.getElementById('admin-password').value = '';
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-booking').classList.add('active');
-  document.getElementById('booking-section').classList.remove('hidden');
-  document.getElementById('admin-login-section').classList.add('hidden');
-  document.getElementById('specialist-login-section').classList.add('hidden');
-});
-
-// ====== Admin Dashboard tabs ======
-document.querySelectorAll('.admin-tab-btn').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.admin-tab-btn').forEach(b => {
-      b.classList.remove('bg-cyan-600', 'text-white');
-      b.classList.add('bg-gray-200');
-    });
-    this.classList.add('bg-cyan-600', 'text-white');
-    this.classList.remove('bg-gray-200');
-    const tab = this.dataset.tab;
-    if (tab === 'specialists') loadAdminSpecialists();
-    else if (tab === 'schedules') loadAdminSchedules();
-    else if (tab === 'reservations') loadAdminReservations();
-    else if (tab === 'generate-token') loadGenerateToken();
-  });
-});
-
-async function loadAdminSpecialists() {
-  const content = document.getElementById('admin-content');
-  try {
-    const data = await apiCall('/specialists', { headers: { 'x-admin-password': currentAdminPassword } });
-    allSpecialists = data;
-    let html = `<h3 class="text-lg font-bold mb-4">قائمة الأخصائيين</h3>`;
-    html += `<button onclick="showSpecialistForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة أخصائي</button>`;
-    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الاسم</th><th class="p-2 border">التخصص</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
-    data.forEach(s => {
-      html += `<tr><td class="p-2 border">${s.name}</td><td class="p-2 border">${s.specialty || ''}</td><td class="p-2 border">
-        <button onclick="editSpecialist(${s.id}, '${s.name}', '${s.specialty || ''}')" class="text-blue-600 mr-2">تعديل</button>
-        <button onclick="deleteSpecialist(${s.id})" class="text-red-600">حذف</button>
-      </td></tr>`;
-    });
-    html += `</tbody></table></div>`;
-    html += `<div id="specialist-form-container" class="mt-4"></div>`;
-    content.innerHTML = html;
-  } catch (e) {
-    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
 }
-
-function showSpecialistForm(id = null, name = '', specialty = '') {
-  const container = document.getElementById('specialist-form-container');
-  const isEdit = id !== null;
-  container.innerHTML = `
-    <form onsubmit="saveSpecialist(event, ${id})" class="space-y-3 bg-gray-50 p-4 rounded">
-      <input type="text" id="s-name" value="${name}" placeholder="الاسم" required class="w-full border p-2 rounded" />
-      <input type="text" id="s-specialty" value="${specialty}" placeholder="التخصص" class="w-full border p-2 rounded" />
-      <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">${isEdit ? 'تعديل' : 'إضافة'}</button>
-      <button type="button" onclick="loadAdminSpecialists()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
-    </form>
-  `;
-}
-
-async function saveSpecialist(e, id) {
-  e.preventDefault();
-  const name = document.getElementById('s-name').value.trim();
-  const specialty = document.getElementById('s-specialty').value.trim();
-  try {
-    if (id) {
-      await apiCall(`/specialists/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
-        body: JSON.stringify({ name, specialty })
-      });
-    } else {
-      await apiCall('/specialists', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
-        body: JSON.stringify({ name, specialty })
-      });
-    }
-    loadAdminSpecialists();
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-async function editSpecialist(id, name, specialty) {
-  showSpecialistForm(id, name, specialty);
-}
-
-async function deleteSpecialist(id) {
-  if (!confirm('هل أنت متأكد من حذف الأخصائي؟')) return;
-  try {
-    await apiCall(`/specialists/${id}`, { method: 'DELETE', headers: { 'x-admin-password': currentAdminPassword } });
-    loadAdminSpecialists();
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-async function loadAdminSchedules() {
-  const content = document.getElementById('admin-content');
-  try {
-    const scheds = await apiCall('/schedules', { headers: { 'x-admin-password': currentAdminPassword } });
-    let html = `<h3 class="text-lg font-bold mb-4">الجداول</h3>`;
-    html += `<button onclick="showScheduleForm()" class="bg-cyan-600 text-white px-4 py-2 rounded mb-4">إضافة جدول</button>`;
-    html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">إجراءات</th></tr></thead><tbody>`;
-    for (let s of scheds) {
-      const spec = allSpecialists.find(sp => sp.id === s.specialist_id) || { name: 'غير معروف' };
-      html += `<tr><td class="p-2 border">${spec.name}</td><td class="p-2 border">${s.date}</td><td class="p-2 border">
-        <button onclick="deleteSchedule(${s.id})" class="text-red-600">حذف</button>
-      </td></tr>`;
-    }
-    html += `</tbody></table></div>`;
-    html += `<div id="schedule-form-container" class="mt-4"></div>`;
-    content.innerHTML = html;
-  } catch (e) {
-    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
-  }
-}
-
-function showScheduleForm() {
-  const container = document.getElementById('schedule-form-container');
-  let options = '';
-  allSpecialists.forEach(s => {
-    options += `<option value="${s.id}">${s.name}</option>`;
-  });
-  container.innerHTML = `
-    <form onsubmit="saveSchedule(event)" class="space-y-3 bg-gray-50 p-4 rounded">
-      <select id="sched-specialist" class="w-full border p-2 rounded">${options}</select>
-      <input type="date" id="sched-date" required class="w-full border p-2 rounded" />
-      <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded">إضافة</button>
-      <button type="button" onclick="loadAdminSchedules()" class="bg-gray-300 px-4 py-2 rounded">إلغاء</button>
-    </form>
-  `;
-}
-
-async function saveSchedule(e) {
-  e.preventDefault();
-  const specialist_id = document.getElementById('sched-specialist').value;
-  const date = document.getElementById('sched-date').value;
-  try {
-    await apiCall('/schedules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
-      body: JSON.stringify({ specialist_id, date })
-    });
-    loadAdminSchedules();
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-async function deleteSchedule(id) {
-  if (!confirm('حذف الجدول سيؤدي لحذف جميع المواعيد المرتبطة. استمر؟')) return;
-  try {
-    await apiCall(`/schedules/${id}`, { method: 'DELETE', headers: { 'x-admin-password': currentAdminPassword } });
-    loadAdminSchedules();
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-async function loadAdminReservations() {
-  const content = document.getElementById('admin-content');
-  try {
-    const reservations = await apiCall('/reservations?all=true', { headers: { 'x-admin-password': currentAdminPassword } });
-    currentReservations = reservations; // تخزين لاستعمالها لاحقاً
-    let html = `<h3 class="text-lg font-bold mb-4">جميع الحجوزات</h3>`;
-    if (reservations.length === 0) {
-      html += `<p>لا توجد حجوزات.</p>`;
-    } else {
-      html += `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">الأخصائي</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">رسالة التوجيه</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
-      reservations.forEach(r => {
-        html += `<tr>
-          <td class="p-2 border">${r.patient_first_name} ${r.patient_last_name}</td>
-          <td class="p-2 border">${r.patient_nin}</td>
-          <td class="p-2 border">${r.patient_dob}</td>
-          <td class="p-2 border">${r.specialist_name}</td>
-          <td class="p-2 border">${r.date}</td>
-          <td class="p-2 border">${r.start_time}</td>
-          <td class="p-2 border"><button class="view-letter-btn text-blue-600" data-reservation-id="${r.id}">عرض</button></td>
-          <td class="p-2 border"><button onclick="deleteReservation(${r.id})" class="text-red-600">حذف</button></td>
-        </tr>`;
-      });
-      html += `</tbody></table></div>`;
-    }
-    content.innerHTML = html;
-    attachModalEvents();
-  } catch (e) {
-    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
-  }
-}
-
-async function deleteReservation(id) {
-  if (!confirm('هل تريد حذف الحجز؟')) return;
-  try {
-    await apiCall(`/reservations/${id}`, { method: 'DELETE', headers: { 'x-admin-password': currentAdminPassword } });
-    loadAdminReservations();
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-async function loadGenerateToken() {
-  const content = document.getElementById('admin-content');
-  try {
-    let html = `<h3 class="text-lg font-bold mb-4">توليد رمز دخول أخصائي</h3>`;
-    html += `<select id="token-specialist" class="border p-2 rounded mb-2">`;
-    allSpecialists.forEach(s => html += `<option value="${s.id}">${s.name}</option>`);
-    html += `</select>`;
-    html += `<button onclick="generateToken()" class="bg-cyan-600 text-white px-4 py-2 rounded">توليد</button>`;
-    html += `<p id="token-result" class="mt-2 font-mono text-green-700"></p>`;
-    content.innerHTML = html;
-  } catch (e) {
-    content.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
-  }
-}
-
-async function generateToken() {
-  const specialistId = document.getElementById('token-specialist').value;
-  try {
-    const res = await apiCall('/generate-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-password': currentAdminPassword },
-      body: JSON.stringify({ specialist_id: specialistId })
-    });
-    document.getElementById('token-result').textContent = 'الرمز: ' + res.token;
-  } catch (e) {
-    alert('خطأ: ' + e.message);
-  }
-}
-
-// ====== Specialist Login ======
-document.getElementById('specialist-login-btn').addEventListener('click', async () => {
-  const token = document.getElementById('specialist-token').value.trim();
-  const msg = document.getElementById('specialist-login-msg');
-  if (!token) return msg.textContent = 'الرجاء إدخال الرمز';
-  try {
-    const data = await apiCall(`/specialist-reservations?token=${encodeURIComponent(token)}`);
-    if (data.error) throw new Error(data.error);
-    specialistToken = token;
-    // currentSpecialistId سيُحدَّث لاحقاً بعد تحميل الحجوزات
-    showSpecialistDashboard();
-  } catch (e) {
-    msg.textContent = 'الرمز غير صحيح أو منتهي الصلاحية';
-    msg.className = 'text-red-600 text-sm mt-2';
-  }
-});
-
-// ====== Specialist Logout ======
-document.getElementById('specialist-logout').addEventListener('click', () => {
-  specialistToken = null;
-  currentSpecialistId = null;
-  showPublicView();
-  document.getElementById('specialist-token').value = '';
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-booking').classList.add('active');
-  document.getElementById('booking-section').classList.remove('hidden');
-  document.getElementById('specialist-login-section').classList.add('hidden');
-  document.getElementById('admin-login-section').classList.add('hidden');
-});
-
-async function loadSpecialistReservations() {
-  const container = document.getElementById('specialist-reservations');
-  try {
-    const data = await apiCall(`/specialist-reservations?token=${encodeURIComponent(specialistToken)}`);
-    if (data.error) throw new Error(data.error);
-    const { specialistId, reservations } = data;
-    currentSpecialistId = specialistId;
-    currentReservations = reservations;
-    if (reservations.length === 0) {
-      container.innerHTML = `<p>لا توجد حجوزات لهذا الأخصائي.</p>`;
-      return;
-    }
-    let html = `<div class="overflow-x-auto"><table class="w-full border"><thead><tr class="bg-gray-100"><th class="p-2 border">المريض</th><th class="p-2 border">NIN</th><th class="p-2 border">تاريخ الميلاد</th><th class="p-2 border">التاريخ</th><th class="p-2 border">الساعة</th><th class="p-2 border">رسالة التوجيه</th><th class="p-2 border">إجراء</th></tr></thead><tbody>`;
-    reservations.forEach(r => {
-      html += `<tr>
-        <td class="p-2 border">${r.patient_first_name} ${r.patient_last_name}</td>
-        <td class="p-2 border">${r.patient_nin}</td>
-        <td class="p-2 border">${r.patient_dob}</td>
-        <td class="p-2 border">${r.date}</td>
-        <td class="p-2 border">${r.start_time}</td>
-        <td class="p-2 border"><button class="view-letter-btn text-blue-600" data-reservation-id="${r.id}">عرض</button></td>
-        <td class="p-2 border"><button class="follow-up-btn text-green-600" data-reservation-id="${r.id}">حجز متابعة</button></td>
-      </tr>`;
-    });
-    html += `</tbody></table></div>`;
-    container.innerHTML = html;
-    attachModalEvents();
-  } catch (e) {
-    container.innerHTML = `<p class="text-red-600">خطأ: ${e.message}</p>`;
-  }
-}
-
-// ====== Modal functions ======
-function showModal(htmlContent) {
-  document.getElementById('modal-body').innerHTML = htmlContent;
-  document.getElementById('modal-overlay').classList.remove('hidden');
-}
-
-document.getElementById('modal-close').addEventListener('click', () => {
-  document.getElementById('modal-overlay').classList.add('hidden');
-});
-
-document.getElementById('modal-overlay').addEventListener('click', function(e) {
-  if (e.target === this) this.classList.add('hidden');
-});
-
-// عرض صورة رسالة التوجيه
-function viewLetter(reservationId) {
-  const reservation = currentReservations.find(r => r.id == reservationId);
-  if (reservation && reservation.letter_base64) {
-    showModal(`<img src="${reservation.letter_base64}" alt="رسالة التوجيه" class="max-w-full h-auto rounded" />`);
-  } else {
-    alert('لا توجد رسالة توجيه لهذا الحجز');
-  }
-}
-
-// ------ متابعة (حجز موعد جديد من قبل الأخصائي) ------
-async function loadSpecialistsIntoSelect(selectId, defaultId = null) {
-  const specialists = await apiCall('/specialists');
-  const select = document.getElementById(selectId);
-  select.innerHTML = '<option value="">اختر الأخصائي</option>';
-  specialists.forEach(s => {
-    const selected = (s.id == defaultId) ? 'selected' : '';
-    select.innerHTML += `<option value="${s.id}" ${selected}>${s.name}${s.specialty ? ' - ' + s.specialty : ''}</option>`;
-  });
-}
-
-async function loadFollowSchedules(specialistId) {
-  const dateSelect = document.getElementById('follow-date');
-  const timeSelect = document.getElementById('follow-time');
-  dateSelect.innerHTML = '<option value="">اختر التاريخ</option>';
-  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
-  if (!specialistId) return;
-  const schedules = await apiCall(`/schedules?specialist_id=${specialistId}`);
-  schedules.forEach(s => dateSelect.innerHTML += `<option value="${s.id}">${s.date}</option>`);
-}
-
-async function loadFollowSlots(scheduleId) {
-  const timeSelect = document.getElementById('follow-time');
-  timeSelect.innerHTML = '<option value="">اختر الساعة</option>';
-  if (!scheduleId) return;
-  const slots = await apiCall(`/slots?schedule_id=${scheduleId}&available=1`);
-  slots.forEach(slot => timeSelect.innerHTML += `<option value="${slot.id}">${slot.start_time}</option>`);
-}
-
-function showFollowUpModal(reservation) {
-  const patient = {
-    nin: reservation.patient_nin,
-    firstName: reservation.patient_first_name,
-    lastName: reservation.patient_last_name,
-    dob: reservation.patient_dob
-  };
-
-  const html = `
-    <h3 class="text-xl font-bold mb-4 text-cyan-800">حجز موعد متابعة</h3>
-    <p class="mb-4"><strong>المريض:</strong> ${patient.firstName} ${patient.lastName} (NIN: ${patient.nin})</p>
-    <div class="space-y-4">
-      <div>
-        <label class="block font-medium mb-1">اختيار الأخصائي</label>
-        <select id="follow-specialist" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"></select>
-      </div>
-      <div>
-        <label class="block font-medium mb-1">التاريخ</label>
-        <select id="follow-date" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"><option value="">اختر التاريخ</option></select>
-      </div>
-      <div>
-        <label class="block font-medium mb-1">الساعة</label>
-        <select id="follow-time" class="w-full border rounded-lg p-3 focus:ring-2 focus:ring-cyan-500 outline-none"><option value="">اختر الساعة</option></select>
-      </div>
-      <button id="submit-follow-up" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-lg transition">تأكيد الحجز</button>
-      <p id="follow-msg" class="text-center text-sm mt-2"></p>
-    </div>
-  `;
-  showModal(html);
-
-  // تحميل الأخصائيين واختيار الأخصائي الحالي تلقائياً
-  loadSpecialistsIntoSelect('follow-specialist', currentSpecialistId);
-
-  document.getElementById('follow-specialist').addEventListener('change', function() {
-    loadFollowSchedules(this.value);
-  });
-  document.getElementById('follow-date').addEventListener('change', function() {
-    loadFollowSlots(this.value);
-  });
-  document.getElementById('submit-follow-up').addEventListener('click', async function() {
-    const msg = document.getElementById('follow-msg');
-    const slotId = document.getElementById('follow-time').value;
-    if (!slotId) {
-      msg.textContent = 'الرجاء اختيار الساعة';
-      return;
-    }
-    try {
-      await apiCall('/reservations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slot_id: slotId,
-          nin: patient.nin,
-          first_name: patient.firstName,
-          last_name: patient.lastName,
-          dob: patient.dob,
-          letter_base64: null
-        })
-      });
-      msg.textContent = 'تم حجز المتابعة بنجاح';
-      // بعد لحظة يمكن إغلاق النافذة
-    } catch (err) {
-      let errorMsg = err.message;
-      try { const e = JSON.parse(err.message); errorMsg = e.error || errorMsg; } catch (e) {}
-      msg.textContent = 'فشل: ' + errorMsg;
-    }
-  });
-}
-
-// ====== ربط أحداث الأزرار في الجداول ======
-function attachModalEvents() {
-  document.querySelectorAll('.view-letter-btn').forEach(btn => {
-    btn.onclick = function() { viewLetter(this.dataset.reservationId); };
-  });
-  document.querySelectorAll('.follow-up-btn').forEach(btn => {
-    btn.onclick = function() {
-      const reservation = currentReservations.find(r => r.id == this.dataset.reservationId);
-      if (reservation) showFollowUpModal(reservation);
-    };
-  });
-}
-
-// ====== Initial load ======
-loadSpecialists();
