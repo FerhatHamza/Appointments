@@ -1,22 +1,20 @@
-// Cloudflare Pages Function – handles all /api/* routes
+const ADMIN_PASSWORD = 'admin123';
 
-const ADMIN_PASSWORD = 'admin123'; // same hardcoded password
-
+// توليد فترات 5 دقائق من 08:30 إلى 13:55 (آخر فترة تبدأ 13:55)
 function generateTimeSlots() {
   const slots = [];
-  const startMinutes = 8 * 60 + 30; // 08:30
-  const endMinutes = 14 * 60;      // 14:00
-  for (let m = startMinutes; m <= endMinutes - 20; m += 20) {
+  const startMinutes = 8 * 60 + 30; // 08:30 -> 510
+  const endMinutes = 14 * 60;       // 14:00 -> 840
+  for (let m = startMinutes; m <= endMinutes - 5; m += 5) {
     const hh = String(Math.floor(m / 60)).padStart(2, '0');
     const mm = String(m % 60).padStart(2, '0');
     slots.push(hh + ':' + mm);
   }
-  return slots;
+  return slots; // 102 فترة
 }
 
 function isAdmin(request) {
-  const pass = request.headers.get('x-admin-password');
-  return pass === ADMIN_PASSWORD;
+  return request.headers.get('x-admin-password') === ADMIN_PASSWORD;
 }
 
 export async function onRequest(context) {
@@ -25,80 +23,74 @@ export async function onRequest(context) {
   const path = url.pathname;
   const method = request.method;
 
-  // CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, x-admin-password',
   };
-  if (method === 'OPTIONS') {
-    return new Response(null, { headers });
-  }
+  if (method === 'OPTIONS') return new Response(null, { headers });
+
+  if (!env.DB) return new Response(JSON.stringify({ error: 'Database binding missing' }), { status: 500, headers });
 
   try {
-    // === Specialists ===
+    // ========== الأخصائيون ==========
     if (path === '/api/specialists' && method === 'GET') {
       const { results } = await env.DB.prepare('SELECT * FROM specialists').all();
       return new Response(JSON.stringify(results), { headers: { ...headers, 'Content-Type': 'application/json' } });
     }
-
     if (path === '/api/specialists' && method === 'POST') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
-      const { name, specialty } = await request.json();
-      await env.DB.prepare('INSERT INTO specialists (name, specialty) VALUES (?, ?)').bind(name, specialty || null).run();
+      const { name, specialty, location } = await request.json();
+      await env.DB.prepare('INSERT INTO specialists (name, specialty, location) VALUES (?, ?, ?)')
+        .bind(name, specialty || null, location || null).run();
       return new Response(JSON.stringify({ success: true }), { headers });
     }
-
     if (path.startsWith('/api/specialists/') && method === 'PUT') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const id = path.split('/')[3];
-      const { name, specialty } = await request.json();
-      await env.DB.prepare('UPDATE specialists SET name = ?, specialty = ? WHERE id = ?').bind(name, specialty || null, id).run();
+      const { name, specialty, location } = await request.json();
+      await env.DB.prepare('UPDATE specialists SET name = ?, specialty = ?, location = ? WHERE id = ?')
+        .bind(name, specialty || null, location || null, id).run();
       return new Response(JSON.stringify({ success: true }), { headers });
     }
-
     if (path.startsWith('/api/specialists/') && method === 'DELETE') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const id = path.split('/')[3];
-      // cascade deletion
       await env.DB.prepare('DELETE FROM specialist_tokens WHERE specialist_id = ?').bind(id).run();
-      const schedules = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ?').bind(id).all();
-      for (const sched of schedules.results) {
-        await env.DB.prepare('DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE schedule_id = ?)').bind(sched.id).run();
-        await env.DB.prepare('DELETE FROM slots WHERE schedule_id = ?').bind(sched.id).run();
+      const scheds = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ?').bind(id).all();
+      for (const s of scheds.results) {
+        await env.DB.prepare('DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE schedule_id = ?)').bind(s.id).run();
+        await env.DB.prepare('DELETE FROM slots WHERE schedule_id = ?').bind(s.id).run();
       }
       await env.DB.prepare('DELETE FROM schedules WHERE specialist_id = ?').bind(id).run();
       await env.DB.prepare('DELETE FROM specialists WHERE id = ?').bind(id).run();
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // === Schedules ===
+    // ========== الجداول ==========
     if (path === '/api/schedules' && method === 'GET') {
-      const specialistId = url.searchParams.get('specialist_id');
+      const sid = url.searchParams.get('specialist_id');
       let query = 'SELECT * FROM schedules';
       const params = [];
-      if (specialistId) {
-        query += ' WHERE specialist_id = ?';
-        params.push(specialistId);
-      }
+      if (sid) { query += ' WHERE specialist_id = ?'; params.push(sid); }
       const { results } = await env.DB.prepare(query).bind(...params).all();
       return new Response(JSON.stringify(results), { headers });
     }
-
     if (path === '/api/schedules' && method === 'POST') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const { specialist_id, date } = await request.json();
-      const existing = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ? AND date = ?').bind(specialist_id, date).first();
+      const existing = await env.DB.prepare('SELECT id FROM schedules WHERE specialist_id = ? AND date = ?')
+        .bind(specialist_id, date).first();
       if (existing) return new Response(JSON.stringify({ error: 'يوجد جدول بالفعل لهذا التاريخ' }), { status: 400, headers });
-      const info = await env.DB.prepare('INSERT INTO schedules (specialist_id, date) VALUES (?, ?)').bind(specialist_id, date).run();
+      const info = await env.DB.prepare('INSERT INTO schedules (specialist_id, date) VALUES (?, ?)')
+        .bind(specialist_id, date).run();
       const scheduleId = info.meta.last_row_id;
-      const slots = generateTimeSlots();
+      const slots = generateTimeSlots(); // هنا المدة 5 دقائق
       const stmt = env.DB.prepare('INSERT INTO slots (schedule_id, start_time) VALUES (?, ?)');
-      const batch = slots.map(time => stmt.bind(scheduleId, time));
+      const batch = slots.map(t => stmt.bind(scheduleId, t));
       await env.DB.batch(batch);
       return new Response(JSON.stringify({ success: true, id: scheduleId }), { headers });
     }
-
     if (path.startsWith('/api/schedules/') && method === 'DELETE') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const id = path.split('/')[3];
@@ -108,25 +100,32 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // === Slots ===
+    // ========== الفترات الزمنية ==========
     if (path === '/api/slots' && method === 'GET') {
-      const scheduleId = url.searchParams.get('schedule_id');
-      const available = url.searchParams.get('available');
-      if (!scheduleId) return new Response('Missing schedule_id', { status: 400 });
-      let query = 'SELECT * FROM slots WHERE schedule_id = ?';
-      const params = [scheduleId];
-      if (available === '1') query += ' AND is_reserved = 0';
-      const { results } = await env.DB.prepare(query).bind(...params).all();
+      const schId = url.searchParams.get('schedule_id');
+      const avail = url.searchParams.get('available');
+      if (!schId) return new Response('Missing schedule_id', { status: 400 });
+      let q = 'SELECT * FROM slots WHERE schedule_id = ?';
+      const params = [schId];
+      if (avail === '1') q += ' AND is_reserved = 0';
+      const { results } = await env.DB.prepare(q).bind(...params).all();
       return new Response(JSON.stringify(results), { headers });
     }
 
-    // === Reservations ===
+    // ========== فحص حجز سابق ==========
+    if (path === '/api/check-reservation' && method === 'GET') {
+      const nin = url.searchParams.get('nin');
+      if (!nin) return new Response('Missing nin', { status: 400 });
+      const row = await env.DB.prepare('SELECT COUNT(*) AS count FROM reservations WHERE patient_nin = ?').bind(nin).first();
+      return new Response(JSON.stringify(row), { headers });
+    }
+
+    // ========== الحجوزات ==========
     if (path === '/api/reservations' && method === 'GET') {
-      const showAll = url.searchParams.get('all') === 'true';
-      if (!showAll) return new Response(JSON.stringify([]), { headers });
+      if (url.searchParams.get('all') !== 'true') return new Response(JSON.stringify([]), { headers });
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const { results } = await env.DB.prepare(`
-        SELECT r.*, s.start_time, sch.date, spec.name as specialist_name
+        SELECT r.*, s.start_time, sch.date, spec.name specialist_name, spec.location specialist_location
         FROM reservations r
         JOIN slots s ON r.slot_id = s.id
         JOIN schedules sch ON s.schedule_id = sch.id
@@ -135,17 +134,35 @@ export async function onRequest(context) {
       `).all();
       return new Response(JSON.stringify(results), { headers });
     }
-
     if (path === '/api/reservations' && method === 'POST') {
-      const { slot_id, nin, first_name, last_name, dob, letter_base64 } = await request.json();
+      const body = await request.json();
+      const { slot_id, nin, first_name, last_name, dob, letter_base64, parent_nin, parent_first_name, parent_last_name, parent_dob } = body;
       const slot = await env.DB.prepare('SELECT id FROM slots WHERE id = ? AND is_reserved = 0').bind(slot_id).first();
       if (!slot) return new Response(JSON.stringify({ error: 'الوقت محجوز أو غير متوفر' }), { status: 409, headers });
-      await env.DB.prepare('INSERT INTO reservations (slot_id, patient_nin, patient_first_name, patient_last_name, patient_dob, letter_base64) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(slot_id, nin, first_name, last_name, dob, letter_base64 || null).run();
+      const result = await env.DB.prepare(`
+        INSERT INTO reservations (slot_id, patient_nin, patient_first_name, patient_last_name, patient_dob, letter_base64, parent_nin, parent_first_name, parent_last_name, parent_dob)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `).bind(slot_id, nin, first_name, last_name, dob, letter_base64 || null, parent_nin || null, parent_first_name || null, parent_last_name || null, parent_dob || null).run();
+      const reservationId = result.meta.last_row_id;
       await env.DB.prepare('UPDATE slots SET is_reserved = 1 WHERE id = ?').bind(slot_id).run();
-      return new Response(JSON.stringify({ success: true }), { headers });
+      // جلب معلومات الطبيب والتاريخ والساعة للتذكرة
+      const ticketInfo = await env.DB.prepare(`
+        SELECT spec.name AS doctor_name, spec.location, sch.date, s.start_time
+        FROM slots s
+        JOIN schedules sch ON s.schedule_id = sch.id
+        JOIN specialists spec ON sch.specialist_id = spec.id
+        WHERE s.id = ?
+      `).bind(slot_id).first();
+      return new Response(JSON.stringify({
+        success: true,
+        id: reservationId,
+        doctor_name: ticketInfo.doctor_name,
+        location: ticketInfo.location,
+        date: ticketInfo.date,
+        time: ticketInfo.start_time,
+        patient: `${first_name} ${last_name}`
+      }), { headers });
     }
-
     if (path.startsWith('/api/reservations/') && method === 'DELETE') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const id = path.split('/')[3];
@@ -156,24 +173,25 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // === Generate specialist token ===
+    // ========== إنشاء رمز الأخصائي ==========
     if (path === '/api/generate-token' && method === 'POST') {
       if (!isAdmin(request)) return new Response('Unauthorized', { status: 401 });
       const { specialist_id } = await request.json();
       const token = crypto.randomUUID();
-      await env.DB.prepare('INSERT INTO specialist_tokens (specialist_id, token) VALUES (?, ?)').bind(specialist_id, token).run();
+      await env.DB.prepare('INSERT INTO specialist_tokens (specialist_id, token) VALUES (?, ?)')
+        .bind(specialist_id, token).run();
       return new Response(JSON.stringify({ token }), { headers });
     }
 
-    // === Specialist reservations by token ===
+    // ========== حجوزات الأخصائي ==========
     if (path === '/api/specialist-reservations' && method === 'GET') {
       const token = url.searchParams.get('token');
       if (!token) return new Response('Token missing', { status: 400 });
-      const tokenRow = await env.DB.prepare('SELECT specialist_id FROM specialist_tokens WHERE token = ?').bind(token).first();
-      if (!tokenRow) return new Response(JSON.stringify({ error: 'رمز غير صالح' }), { status: 403, headers });
-      const specialistId = tokenRow.specialist_id;
+      const row = await env.DB.prepare('SELECT specialist_id FROM specialist_tokens WHERE token = ?').bind(token).first();
+      if (!row) return new Response(JSON.stringify({ error: 'رمز غير صالح' }), { status: 403, headers });
+      const specialistId = row.specialist_id;
       const { results } = await env.DB.prepare(`
-        SELECT r.*, s.start_time, sch.date, spec.name as specialist_name
+        SELECT r.*, s.start_time, sch.date, spec.name specialist_name, spec.location specialist_location
         FROM reservations r
         JOIN slots s ON r.slot_id = s.id
         JOIN schedules sch ON s.schedule_id = sch.id
@@ -181,11 +199,10 @@ export async function onRequest(context) {
         WHERE spec.id = ?
         ORDER BY sch.date, s.start_time
       `).bind(specialistId).all();
-      return new Response(JSON.stringify({ specialistId: specialistId, reservations: results }), { headers });
+      return new Response(JSON.stringify({ specialistId, reservations: results }), { headers });
     }
 
     return new Response('Not Found', { status: 404, headers });
-
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
